@@ -9,7 +9,7 @@ PORT = 1234
 
 
 
-my_clave = input("Clave para la conexion: ").encode()
+MY_CLAVE = input("Clave para la conexion: ").encode()
 
 
 
@@ -26,6 +26,15 @@ clients = {}
 
 
 
+def checkIntegridadMensaje(message,mac):
+    calculada = hmac.digest(MY_CLAVE,message,hashlib.sha3_512).hex()
+    print(calculada)
+    print(mac)
+    if calculada == mac.decode('utf-8'):
+        return True
+    else:
+        return False
+
 def receive_message(client_socket):
     try:
         message_header = client_socket.recv(HEADER_LENGTH)
@@ -35,14 +44,7 @@ def receive_message(client_socket):
         message_length = int(message_header.decode("utf-8").strip())
         message = client_socket.recv(message_length)
 
-        decrypt = hmac.new(my_clave,message,hashlib.sha3_512)
-
-
-
         return {"header":message_header, "data":message}
-
-
-
     except:
         return False
 
@@ -79,7 +81,26 @@ while True:
                 continue
 
             user = clients[notified_socket]
-            print(f"Mensaje recibido desde {user['data'].decode('utf-8')}: {message['data'].decode('utf-8')}")
+            print(f"Mensaje API recibido desde {user['data'].decode('utf-8')}: {message['data'].decode('utf-8')}")
+
+
+            message2 = receive_message(notified_socket)
+            if message2 is False:
+                print(f"Conexion cerrada desde {clients[notified_socket]['data'].decode('utf-8')}")
+                sockets_list.remove(notified_socket)
+                del clients[notified_socket]
+                continue
+
+            user = clients[notified_socket]
+            print(f"Mensaje MAC recibido desde {user['data'].decode('utf-8')}: {message2['data'].decode('utf-8')}")
+
+
+            if checkIntegridadMensaje(message['data'],message2['data']):
+                print("OK, integridad confirmada")
+            else:
+                print("NOPE, integridad comprometida")
+
+
 
 
             #Enviar mensaje a todos pero al que lo ha mandado

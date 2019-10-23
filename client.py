@@ -12,8 +12,13 @@ def recojeInformacionTransferencia():
     def getAlgo(string):
         if string == "SHA3_512":
             return hashlib.sha3_512
+        elif string == "SHA1":
+            return hashlib.sha1
+        elif string == "SHA_256":
+            return hashlib.sha256
         else:
-            pass #TODO
+            print("Se ha producido un error al seleccionar el algoritmo")
+            sys.exit()
 
 
     my_clave = input("Clave para la verificacion de integridad: ").encode()
@@ -41,7 +46,7 @@ HEADER_LENGTH = 10
 IP = "127.0.0.1"
 PORT = 1234
 
-my_username = input("Username: ")
+my_username = input("Nombre de usuario: ")
 
 
 

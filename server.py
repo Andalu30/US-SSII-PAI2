@@ -2,27 +2,61 @@ import socket
 import select # para varias conexiones
 import hmac
 import hashlib
-import sqlite3
+import logging
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+import matplotlib
+import datetime
 
 
-bdHorasMensajes = sqlite3.connect('horasMensajes.db')
-cdb = bdHorasMensajes.cursor()
-#cdb.execute('''CREATE TABLE horas (hora text)''')
+outputfilename = "outputKPI.pdf"
 
+mensajes_recibidos = 0
+mensajes_recibidosOK = 0
 
-
-
-
+HORASDELOSMENSAJES = []
 HEADER_LENGTH = 10
 IP = "127.0.0.1"
 PORT = 1234
 
-
+logFilename = "LogsPAI2.log"
+logging.basicConfig(filename=logFilename,level=logging.DEBUG,format='%(asctime)s:%(levelname)s:%(message)s')
 
 MY_CLAVE = input("Clave para la conexion: ").encode()
+my_algoritmo = input("Algoritmo a utilizar para la verificacion: ")
 
 
 
+
+def generaKPIs(ratio):
+
+    w, h = A4
+    c = canvas.Canvas(outputfilename, pagesize=A4)
+    c.drawString(50, h - 50, "Fichero de indicadores KPI")
+    c.drawString(250, h - 50, f"{datetime.datetime.now()}")
+
+    c.drawString(50, h - 75,f"Ratio de mensajes recibidos correctamente: {ratio}%")
+
+    c.showPage()
+    c.save()
+
+
+
+
+
+
+
+
+def getAlgo(string):
+    if string == "SHA3_512":
+        return hashlib.sha3_512
+    elif string == "SHA1":
+        return hashlib.sha1
+    elif string == "SHA_256":
+        return hashlib.sha256
+    else:
+        print("Se ha producido un error al seleccionar el algoritmo")
+        sys.exit()
 
 
 
@@ -38,18 +72,16 @@ clients = {}
 
 def checkReplayAttack(message):
     horallegada = message.decode('utf-8').split('@')[1]
-    if  cdb.execute('''SELECT * FROM horas WHERE hora=(?) ''', (horallegada,)).rowcount == -1:
-        cdb.execute("INSERT INTO horas VALUES (?)", (horallegada,))
-        bdHorasMensajes.commit()
-        return True
-    else:
+    if horallegada in HORASDELOSMENSAJES:
         return False
-
+    else:
+        HORASDELOSMENSAJES.append(horallegada)
+        return True
 
 def checkIntegridadMensaje(message,mac):
-    calculada = hmac.digest(MY_CLAVE,message,hashlib.sha3_512).hex()
-    print(calculada)
-    print(mac)
+    calculada = hmac.digest(MY_CLAVE,message,getAlgo(my_algoritmo)).hex()
+    logging.debug(calculada)
+    logging.debug(mac)
     if calculada == mac.decode('utf-8'):
         return True
     else:
@@ -89,44 +121,61 @@ while True:
 
             sockets_list.append(client_socket)
             clients[client_socket] = user
-            print(f"Conexion aceptada desde {client_adress[0]}:{client_adress[1]} username:{user['data'].decode('utf-8')}")
+            logging.info(f"Conexion aceptada desde {client_adress[0]}:{client_adress[1]} username:{user['data'].decode('utf-8')}")
 
         else:
             message = receive_message(notified_socket)
             if message is False:
-                print(f"Conexion cerrada desde {clients[notified_socket]['data'].decode('utf-8')}")
+                logging.info(f"Conexion cerrada desde {clients[notified_socket]['data'].decode('utf-8')}")
                 sockets_list.remove(notified_socket)
                 del clients[notified_socket]
                 continue
 
             user = clients[notified_socket]
+            logging.info(f"Mensaje API recibido desde {user['data'].decode('utf-8')}: {message['data'].decode('utf-8')}")
             print(f"Mensaje API recibido desde {user['data'].decode('utf-8')}: {message['data'].decode('utf-8')}")
-
+            
 
             message2 = receive_message(notified_socket)
             if message2 is False:
-                print(f"Conexion cerrada desde {clients[notified_socket]['data'].decode('utf-8')}")
+                logging.info(f"Conexion cerrada desde {clients[notified_socket]['data'].decode('utf-8')}")
                 sockets_list.remove(notified_socket)
                 del clients[notified_socket]
                 continue
 
             user = clients[notified_socket]
+            logging.info(f"Mensaje MAC recibido desde {user['data'].decode('utf-8')}: {message2['data'].decode('utf-8')}")
             print(f"Mensaje MAC recibido desde {user['data'].decode('utf-8')}: {message2['data'].decode('utf-8')}")
+
+            mensajes_recibidos = mensajes_recibidos + 1
 
 
             if checkIntegridadMensaje(message['data'],message2['data']):
                 if checkReplayAttack(message['data']):
+                    logging.info("OK, integridad confirmada")
                     print("OK, integridad confirmada")
+                    mensajes_recibidosOK = mensajes_recibidosOK + 1
+                    
+
+                else:
+                    logging.warning("Ataque de Replay detectado")
+                    print("ERROR: Ataque de Replay detectado")
+
             else:
-                print("NOPE, integridad comprometida")
+                logging.warning("NOPE, integridad comprometida")
+                print("ERROR: integridad comprometida del mensaje")
+
+
+            ratioKPI = (mensajes_recibidosOK/mensajes_recibidos)*100
+            generaKPIs(ratioKPI)
 
 
 
 
-            #Enviar mensaje a todos pero al que lo ha mandado
-            for client_socket in clients:
-                if client_socket != notified_socket:
-                    client_socket.send(user['header']+user['data']+message['header']+message['data'])
+            ##Enviar mensaje a todos menos al que lo ha mandado
+            #for client_socket in clients:
+            #    if client_socket != notified_socket:
+            #        client_socket.send(user['header']+user['data']+message['header']+message['data'])
 
 
         for notified_socket in exception_sockets:

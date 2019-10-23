@@ -2,6 +2,16 @@ import socket
 import select # para varias conexiones
 import hmac
 import hashlib
+import sqlite3
+
+
+bdHorasMensajes = sqlite3.connect('horasMensajes.db')
+cdb = bdHorasMensajes.cursor()
+#cdb.execute('''CREATE TABLE horas (hora text)''')
+
+
+
+
 
 HEADER_LENGTH = 10
 IP = "127.0.0.1"
@@ -10,6 +20,8 @@ PORT = 1234
 
 
 MY_CLAVE = input("Clave para la conexion: ").encode()
+
+
 
 
 
@@ -24,6 +36,14 @@ sockets_list = [server_socket]
 clients = {}
 
 
+def checkReplayAttack(message):
+    horallegada = message.decode('utf-8').split('@')[1]
+    if  cdb.execute('''SELECT * FROM horas WHERE hora=(?) ''', (horallegada,)).rowcount == -1:
+        cdb.execute("INSERT INTO horas VALUES (?)", (horallegada,))
+        bdHorasMensajes.commit()
+        return True
+    else:
+        return False
 
 
 def checkIntegridadMensaje(message,mac):
@@ -54,7 +74,6 @@ def receive_message(client_socket):
 
 
 # Servidor overkill basado en el tutorial de sockets de Harrison Kinsley
-
 while True:
     read_sockets, _, exception_sockets = select.select(sockets_list, [],sockets_list)
     # readlist , writelist, error list
@@ -96,7 +115,8 @@ while True:
 
 
             if checkIntegridadMensaje(message['data'],message2['data']):
-                print("OK, integridad confirmada")
+                if checkReplayAttack(message['data']):
+                    print("OK, integridad confirmada")
             else:
                 print("NOPE, integridad comprometida")
 
